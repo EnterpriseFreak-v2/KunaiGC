@@ -114,16 +114,14 @@ endif
 
 #---------------------------------------------------------------------------------
 
-.PHONY: all dol gci qoobpro qoobsx viper dol_compressed gci_compressed viper_compressed $(BUILD) clean run
+.PHONY: all dol qoobpro qoobsx viper dol_compressed viper_compressed $(BUILD) clean run
 
 export BUILD_MAKE := @mkdir -p $(BUILD) && $(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
 #---------------------------------------------------------------------------------
-all: dol gci qoobpro viper dol_compressed gci_compressed 
+all: dol qoobpro viper dol_compressed
 dol:
 	$(BUILD_MAKE) $(OUTPUT).dol
-gci:
-	$(BUILD_MAKE) $(OUTPUT).gci
 qoobpro:
 	$(BUILD_MAKE) $(OUTPUT).gcb
 qoobsx:
@@ -132,8 +130,6 @@ viper:
 	$(BUILD_MAKE) $(OUTPUT).vgc
 dol_compressed:
 	$(BUILD_MAKE) $(OUTPUT)_xz.dol
-gci_compressed:
-	$(BUILD_MAKE) $(OUTPUT)_xz.gci
 viper_compressed:
 	$(BUILD_MAKE) $(OUTPUT)_xz.vgc
 
