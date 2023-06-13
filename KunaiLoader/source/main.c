@@ -9,11 +9,9 @@
 #include <ogc/system.h>
 #include "etc/ffshim.h"
 #include "fatfs/ff.h"
-#include "menu.h"
-
-#include "etc/stub.h"
-#define STUB_ADDR  0x80001000
-#define STUB_STACK 0x80003000
+#include "kunaigc/kunaigc.h"
+#include "bootdol.h"
+#include "menus/bootmenu.h"
 
 int screenheight;
 int vmode_60hz = 0;
@@ -21,16 +19,7 @@ u32 retraceCount;
 
 #include "gfx/kunai_logo.h"
 #include "gfx/gfx.h"
-#include "spiflash/spiflash.h"
-#include "kunaigc/kunaigc.h"
 #define KUNAI_VERSION "1.0"
-
-u8 *dol = NULL;
-char *path = "/KUNAIGC/ipl.dol";
-
-extern lfs_t lfs;
-extern lfs_file_t lfs_file;
-extern struct lfs_config cfg;
 
 struct shortcut {
   u16 pad_buttons;
@@ -48,351 +37,12 @@ struct shortcut {
 };
 int num_shortcuts = sizeof(shortcuts)/sizeof(shortcuts[0]);
 
-void dol_alloc(int size)
-{
-    int mram_size = (SYS_GetArenaHi() - SYS_GetArenaLo());
-    kprintf("Memory available: %iB\n", mram_size);
-
-    kprintf("DOL size is %iB\n", size);
-
-    if (size <= 0)
-    {
-        kprintf("Empty DOL\n");
-        return;
-    }
-
-    dol = (u8 *) memalign(32, size);
-
-    if (!dol)
-    {
-        kprintf("Couldn't allocate memory\n");
-    }
-}
-
-int load_fat(const char *slot_name, const DISC_INTERFACE *iface_)
-{
-    int res = 1;
-
-    kprintf("Trying %s\n", slot_name);
-
-    FATFS fs;
-    iface = iface_;
-    if (f_mount(&fs, "", 1) != FR_OK)
-    {
-        kprintf("Couldn't mount %s\n", slot_name);
-        res = 0;
-        goto end;
-    }
-
-    char name[256];
-    f_getlabel(slot_name, name, NULL);
-    kprintf("Mounted %s as %s\n", name, slot_name);
-
-    kprintf("Reading %s\n", path);
-    FIL file;
-    if (f_open(&file, path, FA_READ) != FR_OK)
-    {
-        kprintf("Failed to open file\n");
-        res = 0;
-        goto unmount;
-    }
-
-    size_t size = f_size(&file);
-    dol_alloc(size);
-    if (!dol)
-    {
-        res = 0;
-        goto unmount;
-    }
-    UINT _;
-    f_read(&file, dol, size, &_);
-    f_close(&file);
-
-unmount:
-    kprintf("Unmounting %s\n", slot_name);
-    iface->shutdown();
-    iface = NULL;
-
-end:
-    return res;
-}
-
-unsigned int convert_int(unsigned int in)
-{
-    unsigned int out;
-    char *p_in = (char *) &in;
-    char *p_out = (char *) &out;
-    p_out[0] = p_in[3];
-    p_out[1] = p_in[2];
-    p_out[2] = p_in[1];
-    p_out[3] = p_in[0];
-    return out;
-}
-
-#define PC_READY 0x80
-#define PC_OK    0x81
-#define GC_READY 0x88
-#define GC_OK    0x89
-
-int load_usb(char slot)
-{
-    kprintf("Trying USB Gecko in slot %c\n", slot);
-
-    int channel, res = 1;
-
-    switch (slot)
-    {
-    case 'B':
-        channel = 1;
-        break;
-
-    case 'A':
-    default:
-        channel = 0;
-        break;
-    }
-
-    if (!usb_isgeckoalive(channel))
-    {
-        kprintf("Not present\n");
-        res = 0;
-        goto end;
-    }
-
-    usb_flush(channel);
-
-    char data;
-
-    kprintf("Sending ready\n");
-    data = GC_READY;
-    usb_sendbuffer_safe(channel, &data, 1);
-
-    kprintf("Waiting for ack...\n");
-    while ((data != PC_READY) && (data != PC_OK))
-        usb_recvbuffer_safe(channel, &data, 1);
-
-    if(data == PC_READY)
-    {
-        kprintf("Respond with OK\n");
-        // Sometimes the PC can fail to receive the byte, this helps
-        usleep(100000);
-        data = GC_OK;
-        usb_sendbuffer_safe(channel, &data, 1);
-    }
-
-    kprintf("Getting DOL size\n");
-    int size;
-    usb_recvbuffer_safe(channel, &size, 4);
-    size = convert_int(size);
-
-    dol_alloc(size);
-    unsigned char* pointer = dol;
-
-    if(!dol)
-    {
-        res = 0;
-        goto end;
-    }
-
-    kprintf("Receiving file...\n");
-    while (size > 0xF7D8)
-    {
-        usb_recvbuffer_safe(channel, (void *) pointer, 0xF7D8);
-        size -= 0xF7D8;
-        pointer += 0xF7D8;
-    }
-    if(size)
-        usb_recvbuffer_safe(channel, (void *) pointer, size);
-
-end:
-    return res;
-}
-
 extern u8 __xfb[];
-
-int rebootToIPL()
-{
-	exit(0);
-}
-
-int loadSwissDOL()
-{
-	int load_lfs(const char* path);
-	load_lfs("swiss.dol");
-	memcpy((void *) STUB_ADDR, stub, stub_size);
-	DCStoreRange((void *) STUB_ADDR, stub_size);
-
-	SYS_ResetSystem(SYS_SHUTDOWN, 0, FALSE);
-	SYS_SwitchFiber((intptr_t) dol, 0,
-				(intptr_t) NULL, 0,
-				STUB_ADDR, STUB_STACK);
-	return 0;
-}
-
-#define MIN_INDEX 0
-#define MAX_INDEX 3
-void draw_menu(void){
-	CON_InitEx(rmode, 0, 0, 640, 480);
-	struct menu menu;
-	menu.maxItems = 16;
-
-	initializeMenu(&menu);
-	addItemToMenu(&menu, "Swiss.dol (Internal memory)", loadSwissDOL, 1);
-	addItemToMenu(&menu, "Not selectable", NULL, 0);
-	addItemToMenu(&menu, "Reboot to IPL", rebootToIPL, 1);
-
-	u32 jedec_id = kunai_get_jedecID();
-	cfg.block_count = (((1 << (jedec_id & 0xFFUL)) - KUNAI_OFFS) / cfg.block_size);
-
-	int err = lfs_mount(&lfs, &cfg);
-
-	// reformat if we can't mount the filesystem
-	// this should only happen on the first boot
-	if (err) {
-		lfs_format(&lfs, &cfg);
-		lfs_mount(&lfs, &cfg);
-	}
-	// read current count
-	uint32_t boot_count = 0;
-	lfs_file_open(&lfs, &lfs_file, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
-	lfs_file_read(&lfs, &lfs_file, &boot_count, sizeof(boot_count));
-
-    // update boot count
-    boot_count += 1;
-    lfs_file_rewind(&lfs, &lfs_file);
-    lfs_file_write(&lfs, &lfs_file, &boot_count, sizeof(boot_count));
-
-    // remember the storage is not updated until the file is closed successfully
-    lfs_file_close(&lfs, &lfs_file);
-
-    // release any resources we were using
-    lfs_unmount(&lfs);
-
-	int8_t cursor_idx = 0;
-		ClearScreen();
-
-		writeLine(0, 0, 640, 480, COL_HIGHLIGHT);
-		drawCircle(320, 240, 50, COL_HIGHLIGHT);
-
-		int x = 50;
-		for(uint8_t i = 0; i < 10; i++) {
-
-			drawBitmap(640-250-25*i, i*x , image_data_KunaiGCLogo, 250, 81, 0);
-		}
-
-		drawString(50, 300,(unsigned char *) "KunaiGC Rockz!", getColor(255,255,255), getColor(255,255,255), 4,4);
-
-	while(1){
-
-		processMenu(&menu);
-		VIDEO_WaitVSync();
-
-		/*
-		kprintf("KunaiGC v%s\n", KUNAI_VERSION);
-		kprintf("\tBy\t ManCloud\n"
-				"\t\t seewood\n"
-				"\t\t derKevin\n\n");
-		kprintf("SPIFlash-JEDEC ID: 0x%06X\n", kunai_get_jedecID());
-
-		kprintf("\n%s Reactivate KunaiGC", cursor_idx == 1 ? "*" : "");
-		kprintf("\n%s Enable Passthrough", cursor_idx == 2 ? "*" : "");
-		kprintf("\n%s Disable Passthrough", cursor_idx == 3 ? "*" : "");
-
-		kprintf("\n\nPress 'B' to return.");
-
-		kprintf("\n\nKunaiGC Menu Boot Count: %u", boot_count);
-
-		PAD_ScanPads();
-		u16 currBtns = PAD_ButtonsHeld(0);
-
-		while(currBtns == PAD_ButtonsHeld(0)) {
-			PAD_ScanPads();
-			VIDEO_WaitVSync();
-		}
-
-		if(PAD_ButtonsHeld(0) & PAD_BUTTON_A) {
-			while(PAD_ButtonsHeld(0) & PAD_BUTTON_A) PAD_ScanPads();
-			switch (cursor_idx) {
-			case 0: kunai_disable(); break;
-			case 1: kunai_reenable(); break;
-			case 2: kunai_enable_passthrough(); break;
-			case 3: kunai_disable_passthrough(); break;
-			default: break;
-			}
-		}
-
-		if (PAD_ButtonsHeld(0) & PAD_BUTTON_DOWN){
-			while(PAD_ButtonsHeld(0) & PAD_BUTTON_DOWN) PAD_ScanPads();
-			cursor_idx++;
-			cursor_idx = MIN(cursor_idx, MAX_INDEX);
-		}
-
-		if (PAD_ButtonsHeld(0) & PAD_BUTTON_UP){
-			while(PAD_ButtonsHeld(0) & PAD_BUTTON_UP) PAD_ScanPads();
-			cursor_idx--;
-			cursor_idx = MAX(cursor_idx, MIN_INDEX);
-		}
-
-		if (PAD_ButtonsHeld(0) & PAD_BUTTON_B){
-			while(PAD_ButtonsHeld(0) & PAD_BUTTON_UP) PAD_ScanPads();
-			ClearScreen();
-			break;
-		}*/
-
-
-	}
-}
-
-int load_lfs(const char * filePath)
-{
-    int res = 1;
-
-    kprintf("Trying lfs\n");
-
-    //update block_count regarding to flash chip
-    u32 jedec_id = kunai_get_jedecID();
-    cfg.block_count = (((1 << (jedec_id & 0xFFUL)) - KUNAI_OFFS) / cfg.block_size);
-
-	int err = lfs_mount(&lfs, &cfg);
-
-    if (err != LFS_ERR_OK)
-    {
-        kprintf("Couldn't mount lfs\n");
-        res = 0;
-        goto end;
-    }
-
-    kprintf("lfs mounted\n");
-
-    kprintf("Reading %s\n", filePath);
-    if (lfs_file_open(&lfs, &lfs_file, filePath, LFS_O_RDWR) != LFS_ERR_OK)
-    {
-        kprintf("Failed to open file\n");
-        res = 0;
-        goto unmount;
-    }
-
-    size_t size = lfs_file_size(&lfs, &lfs_file);
-    dol_alloc(size);
-    if (!dol)
-    {
-        res = 0;
-        goto unmount;
-    }
-    lfs_file_read(&lfs, &lfs_file, dol, size);
-    lfs_file_close(&lfs, &lfs_file);
-unmount:
-    kprintf("Unmounting lfs\n");
-    lfs_unmount(&lfs);
-end:
-    return res;
-}
 
 GXRModeObj *rmode = NULL;
 
 int main()
 {
-main_start:
 	VIDEO_Init ();		/*** ALWAYS CALL FIRST IN ANY LIBOGC PROJECT!
 					     Not only does it initialise the video
 					     subsystem, but also sets up the ogc os
@@ -469,60 +119,25 @@ main_start:
 
 
 	if (buttonsHeld & PAD_TRIGGER_Z) {
-		draw_menu();
+		bootmenu();
 		while(buttonsHeld) {
 
 			PAD_ScanPads();
 			buttonsHeld = PAD_ButtonsHeld(PAD_CHAN0);
 		};
-		goto main_start;
-
 	}
-
-	for (int i = 0; i < num_shortcuts; i++) {
-		if (buttonsHeld & shortcuts[i].pad_buttons) {
-			path = shortcuts[i].path;
-			break;
-		}
-	}
-
-	CON_Init(__xfb, 0, 0, rmode->fbWidth, rmode->xfbHeight, rmode->fbWidth * VI_DISPLAY_PIX_SZ);
 
 	kprintf("\n\nKunaiLoader - based on iplboot\n");
 
-	if (buttonsHeld & PAD_BUTTON_START) {
-		if (load_lfs("swiss.dol")) goto load;
-	}
+	if (loaddol_lfs("swiss.dol")) goto launch;
+	if (loaddol_fat("Slot A", &__io_gcsda)) goto launch;
+	if (loaddol_fat("Slot A", &__io_gcsdb)) goto launch;
+	if (loaddol_fat("SD2SP2", &__io_gcsd2)) goto launch;
+	if (loaddol_usb('A')) goto launch;
+	if (loaddol_usb('B')) goto launch;
 
-	if (load_usb('B')) goto load;
-
-	if (load_fat("sdb", &__io_gcsdb)) goto load;
-
-	if (load_usb('A')) goto load;
-
-	if (load_fat("sda", &__io_gcsda)) goto load;
-
-	if (load_fat("sd2", &__io_gcsd2)) goto load;
-
-	load:
-	// Wait to exit while the d-pad down direction is held.
-	while (buttonsHeld & PAD_BUTTON_DOWN)
-	{
-		VIDEO_WaitVSync();
-		PAD_ScanPads();
-		buttonsHeld = PAD_ButtonsHeld(PAD_CHAN0);
-	}
-
-	if (dol)
-	{
-		memcpy((void *) STUB_ADDR, stub, stub_size);
-		DCStoreRange((void *) STUB_ADDR, stub_size);
-
-		SYS_ResetSystem(SYS_SHUTDOWN, 0, FALSE);
-		SYS_SwitchFiber((intptr_t) dol, 0,
-				(intptr_t) NULL, 0,
-				STUB_ADDR, STUB_STACK);
-	}
+	launch:
+	launchDol();
 	// If we reach here, all attempts to load a DOL failed
 	// Since we've disabled the Qoob, we wil reboot to the Nintendo IPL
 	return 0;

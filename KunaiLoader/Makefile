@@ -21,7 +21,7 @@ include $(DEVKITPPC)/gamecube_rules
 #---------------------------------------------------------------------------------
 TARGET		:=	$(notdir $(CURDIR))
 BUILD		:=	build
-SOURCES		:=	source source/fatfs source/etc source/kunaigc source/spiflash source/gfx source/lfs
+SOURCES		:=	source source/fatfs source/etc source/kunaigc source/spiflash source/gfx source/lfs source/menus
 DATA		:=	data
 INCLUDES	:=
 
