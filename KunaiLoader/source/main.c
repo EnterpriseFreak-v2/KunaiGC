@@ -437,34 +437,22 @@ main_start:
 	settime(secs_to_ticks(t));
 
 	PAD_ScanPads();
-
-	u16 all_buttons_held = (
-			PAD_ButtonsHeld(PAD_CHAN0) |
-			PAD_ButtonsHeld(PAD_CHAN1) |
-			PAD_ButtonsHeld(PAD_CHAN2) |
-			PAD_ButtonsHeld(PAD_CHAN3)
-	);
+	u16 buttonsHeld = PAD_ButtonsHeld(PAD_CHAN0);
 
 
-	if (all_buttons_held & PAD_TRIGGER_Z) {
+	if (buttonsHeld & PAD_TRIGGER_Z) {
 		draw_menu();
-		while(all_buttons_held) {
+		while(buttonsHeld) {
 
 			PAD_ScanPads();
-
-			all_buttons_held = (
-					PAD_ButtonsHeld(PAD_CHAN0) |
-					PAD_ButtonsHeld(PAD_CHAN1) |
-					PAD_ButtonsHeld(PAD_CHAN2) |
-					PAD_ButtonsHeld(PAD_CHAN3)
-			);
+			buttonsHeld = PAD_ButtonsHeld(PAD_CHAN0);
 		};
 		goto main_start;
 
 	}
 
 	for (int i = 0; i < num_shortcuts; i++) {
-		if (all_buttons_held & shortcuts[i].pad_buttons) {
+		if (buttonsHeld & shortcuts[i].pad_buttons) {
 			path = shortcuts[i].path;
 			break;
 		}
@@ -474,7 +462,7 @@ main_start:
 
 	kprintf("\n\nKunaiLoader - based on iplboot\n");
 
-	if (all_buttons_held & PAD_BUTTON_START) {
+	if (buttonsHeld & PAD_BUTTON_START) {
 		if (load_lfs("swiss.dol")) goto load;
 	}
 
@@ -490,16 +478,11 @@ main_start:
 
 	load:
 	// Wait to exit while the d-pad down direction is held.
-	while (all_buttons_held & PAD_BUTTON_DOWN)
+	while (buttonsHeld & PAD_BUTTON_DOWN)
 	{
 		VIDEO_WaitVSync();
 		PAD_ScanPads();
-		all_buttons_held = (
-				PAD_ButtonsHeld(PAD_CHAN0) |
-				PAD_ButtonsHeld(PAD_CHAN1) |
-				PAD_ButtonsHeld(PAD_CHAN2) |
-				PAD_ButtonsHeld(PAD_CHAN3)
-		);
+		buttonsHeld = PAD_ButtonsHeld(PAD_CHAN0);
 	}
 
 	if (dol)
