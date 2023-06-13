@@ -1,8 +1,12 @@
 #ifndef __MENU_H
 #define __MENU_H
 
+#define PROCESS_MENU_DONE       0
+#define PROCESS_MENU_CLOSED     1
+
 // Menu structure
 struct menu {
+    int enableClosing;          // Determines wether a menu can be closed using the B button or not.
     int maxItems;               // Maximum amount of items allowed in this menu. Also used by initializeMenu().
     int currentSlot;            // Used to keep track of how many item slots are already used.
     int cursor;                 // Position of the cursor in the menu.
@@ -34,6 +38,8 @@ int destroyMenu(struct menu *menu);
 int addItemToMenu(struct menu *menu, const char *label, void *function, int selectable);
 
 // Draws the menu and handles inputs for it. Should be called once per frame as long as the menu is meant to be active.
-void processMenu(struct menu* menu);
+// Returns PROCESS_MENU_DONE once the menu has been processed for this frame.
+// Returns PROCESS_MENU_CLOSED when the user has hit the B button to close the menu. (Only for menus with enableClosing set!)
+int processMenu(struct menu* menu);
 
 #endif

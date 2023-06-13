@@ -50,7 +50,7 @@ int addItemToMenu(struct menu *menu, const char *label, void *function, int sele
 }
 
 // Does all the menu stuff.
-void processMenu(struct menu* menu) {
+int processMenu(struct menu* menu) {
     kprintf("\x1b[1;0H");
 
     // Make sure the cursor stays in-bounds.
@@ -133,9 +133,16 @@ void processMenu(struct menu* menu) {
         }
     }
 
-    // Jump to the function assigned to this item.
-    if (buttonsDown & PAD_BUTTON_A) {
+    // Jump to the function assigned to this item. Make sure it's not NULL first, we don't want to crash the system.
+    if (buttonsDown & PAD_BUTTON_A && menu->items[menu->cursor].function != NULL) {
         typedef void fn(void);
         ((fn*)menu->items[menu->cursor].function)();
     }
+
+    // If this menu has enableClosing set and the B button is pressed return PROCESS_MENU_CLOSED to let the caller know the menu has been closed by the user.
+    if (buttonsDown & PAD_BUTTON_B && menu->enableClosing) {
+        return PROCESS_MENU_CLOSED;
+    }
+
+    return PROCESS_MENU_DONE;
 }

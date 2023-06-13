@@ -15,6 +15,7 @@ void launchIPL() {
 void bootmenu() {
     struct menu bootmenu;
     bootmenu.maxItems = 16;
+    bootmenu.enableClosing = 0;
     initializeMenu(&bootmenu);
 
     addItemToMenu(&bootmenu, "KunaiGC", NULL, 0);
