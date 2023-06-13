@@ -9,6 +9,7 @@
 #include <ogc/system.h>
 #include "etc/ffshim.h"
 #include "fatfs/ff.h"
+#include "menu.h"
 
 #include "etc/stub.h"
 #define STUB_ADDR  0x80001000
@@ -209,9 +210,37 @@ end:
 
 extern u8 __xfb[];
 
+int rebootToIPL()
+{
+	exit(0);
+}
+
+int loadSwissDOL()
+{
+	int load_lfs(const char* path);
+	load_lfs("swiss.dol");
+	memcpy((void *) STUB_ADDR, stub, stub_size);
+	DCStoreRange((void *) STUB_ADDR, stub_size);
+
+	SYS_ResetSystem(SYS_SHUTDOWN, 0, FALSE);
+	SYS_SwitchFiber((intptr_t) dol, 0,
+				(intptr_t) NULL, 0,
+				STUB_ADDR, STUB_STACK);
+	return 0;
+}
+
 #define MIN_INDEX 0
 #define MAX_INDEX 3
 void draw_menu(void){
+	CON_InitEx(rmode, 0, 0, 640, 480);
+	struct menu menu;
+	menu.maxItems = 16;
+
+	initializeMenu(&menu);
+	addItemToMenu(&menu, "Swiss.dol (Internal memory)", loadSwissDOL, 1);
+	addItemToMenu(&menu, "Not selectable", NULL, 0);
+	addItemToMenu(&menu, "Reboot to IPL", rebootToIPL, 1);
+
 	u32 jedec_id = kunai_get_jedecID();
 	cfg.block_count = (((1 << (jedec_id & 0xFFUL)) - KUNAI_OFFS) / cfg.block_size);
 
@@ -254,18 +283,17 @@ void draw_menu(void){
 		drawString(50, 300,(unsigned char *) "KunaiGC Rockz!", getColor(255,255,255), getColor(255,255,255), 4,4);
 
 	while(1){
-		ShowScreen();
 
-		CON_InitEx(rmode, 20, 20, 240, 240);
+		processMenu(&menu);
+		VIDEO_WaitVSync();
 
-
+		/*
 		kprintf("KunaiGC v%s\n", KUNAI_VERSION);
 		kprintf("\tBy\t ManCloud\n"
 				"\t\t seewood\n"
 				"\t\t derKevin\n\n");
 		kprintf("SPIFlash-JEDEC ID: 0x%06X\n", kunai_get_jedecID());
 
-		kprintf("\n%s Deactivate KunaiGC", cursor_idx == 0 ? "*" : "");
 		kprintf("\n%s Reactivate KunaiGC", cursor_idx == 1 ? "*" : "");
 		kprintf("\n%s Enable Passthrough", cursor_idx == 2 ? "*" : "");
 		kprintf("\n%s Disable Passthrough", cursor_idx == 3 ? "*" : "");
@@ -309,7 +337,7 @@ void draw_menu(void){
 			while(PAD_ButtonsHeld(0) & PAD_BUTTON_UP) PAD_ScanPads();
 			ClearScreen();
 			break;
-		}
+		}*/
 
 
 	}
